@@ -6,7 +6,7 @@ const PORT = 1000;
 app.use(express.json());
 
 app.get('/', (req, res) => {
-  res.send('Hello from NotesNest server!');
+  res.send('Hello from NotesNest server!, yeahhh!!');
 });
 
 app.listen(PORT, () => {
