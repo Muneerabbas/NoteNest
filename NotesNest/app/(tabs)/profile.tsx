@@ -1,296 +1,277 @@
-import { ScrollView, StyleSheet, View } from 'react-native';
+import { Alert, Pressable, ScrollView, StyleSheet, Switch, Text, View } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
+import { router } from 'expo-router';
 
-import { ThemedText } from '@/components/themed-text';
-import { ThemedView } from '@/components/themed-view';
 import { IconSymbol } from '@/components/ui/icon-symbol';
-import { Fonts } from '@/constants/theme';
+import { Colors, Fonts } from '@/constants/theme';
 import { useAuth } from '@/context/auth-context';
+import { useThemePreference } from '@/context/theme-context';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 
-const palette = {
-  light: {
-    background: '#F2F5F3',
-    ink: '#1A1C1A',
-    muted: '#667068',
-    card: '#FFFFFF',
-    accent: '#CFE7DE',
-    accentDeep: '#2B7A66',
-    line: '#DEE6E1',
-    glow1: '#D7EEE6',
-    glow2: '#F7E3C5',
-  },
-  dark: {
-    background: '#121513',
-    ink: '#F3F7F4',
-    muted: '#AAB4AE',
-    card: '#1A1F1C',
-    accent: '#2B7A66',
-    accentDeep: '#CFE7DE',
-    line: '#28302B',
-    glow1: '#1F2D27',
-    glow2: '#3A2B1B',
-  },
+type MenuItem = {
+  icon: string;
+  label: string;
+  subtitle?: string;
+  color?: string;
+  onPress?: () => void;
+  trailing?: 'chevron' | 'switch';
 };
-
-const stats = [
-  { label: 'Notes', value: '128' },
-  { label: 'Collections', value: '9' },
-  { label: 'Streak', value: '7 days' },
-];
-
-const habits = [
-  { label: 'Daily capture', value: 0.82 },
-  { label: 'Weekly review', value: 0.64 },
-  { label: 'Archive cleanup', value: 0.45 },
-];
 
 export default function ProfileScreen() {
   const scheme = useColorScheme() ?? 'light';
-  const colors = palette[scheme];
-  const { token, clearAuthToken } = useAuth();
+  const c = Colors[scheme];
+  const { clearAuthToken } = useAuth();
+  const { toggleTheme } = useThemePreference();
+
+  const accountItems: MenuItem[] = [
+    {
+      icon: 'pencil',
+      label: 'Edit Profile',
+      subtitle: 'Name and photo',
+      onPress: () => Alert.alert('Coming soon', 'Profile editing will be available soon.'),
+    },
+    { icon: 'bell', label: 'Notifications', subtitle: 'Manage alerts' },
+    {
+      icon: 'bookmark.fill',
+      label: 'Saved Notes',
+      subtitle: 'Your bookmarks',
+      onPress: () => router.navigate('/(tabs)/explore'),
+    },
+    {
+      icon: 'shield.fill',
+      label: 'Privacy',
+      subtitle: 'Account security',
+      onPress: () => router.push('/privacy'),
+    },
+  ];
+
+  const appItems: MenuItem[] = [
+    {
+      icon: 'paintbrush.fill',
+      label: 'Theme',
+      subtitle: `Current: ${scheme === 'dark' ? 'Dark' : 'Light'} mode`,
+      onPress: toggleTheme,
+      trailing: 'switch',
+    },
+    {
+      icon: 'questionmark.circle',
+      label: 'Help & Support',
+      subtitle: 'Contact support',
+      onPress: () => router.push('/help-support'),
+    },
+    { icon: 'info.circle', label: 'About', subtitle: 'Version 1.0.0' },
+  ];
+
+  const renderItem = (item: MenuItem, isLast: boolean) => (
+    <Pressable
+      key={item.label}
+      style={[
+        styles.menuItem,
+        !isLast && { borderBottomWidth: 1, borderBottomColor: c.border },
+      ]}
+      onPress={item.onPress}
+    >
+      <View style={[styles.menuIcon, { backgroundColor: c.accentSoft }]}>
+        <IconSymbol name={item.icon as any} size={18} color={c.accent} />
+      </View>
+      <View style={styles.menuContent}>
+        <Text style={[styles.menuLabel, { color: c.text }]}>{item.label}</Text>
+        {item.subtitle && (
+          <Text style={[styles.menuSub, { color: c.textSecondary }]}>{item.subtitle}</Text>
+        )}
+      </View>
+      {item.trailing === 'switch' ? (
+        <Switch
+          value={scheme === 'dark'}
+          onValueChange={toggleTheme}
+          trackColor={{ false: c.border, true: c.accent }}
+          thumbColor="#FFFFFF"
+        />
+      ) : (
+        <IconSymbol name="chevron.right" size={16} color={c.muted} />
+      )}
+    </Pressable>
+  );
 
   return (
-    <ThemedView style={[styles.page, { backgroundColor: colors.background }]}
-      lightColor={palette.light.background}
-      darkColor={palette.dark.background}>
-      <View style={[styles.glow, styles.glowOne, { backgroundColor: colors.glow1 }]} />
-      <View style={[styles.glow, styles.glowTwo, { backgroundColor: colors.glow2 }]} />
+    <SafeAreaView style={[styles.safe, { backgroundColor: c.background }]}>
+      <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
+        <Text style={[styles.title, { color: c.text }]}>Profile</Text>
 
-      <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
-        <View style={[styles.profileCard, { backgroundColor: colors.card, borderColor: colors.line }]}
-          >
-          <View style={[styles.avatar, { backgroundColor: colors.accent }]}
-            >
-            <IconSymbol name="person.crop.circle" size={40} color={colors.ink} />
+        <View style={[styles.profileCard, { backgroundColor: c.card, borderColor: c.border }]}>
+          <View style={[styles.avatar, { backgroundColor: c.accent }]}>
+            <Text style={styles.avatarText}>M</Text>
           </View>
           <View style={styles.profileInfo}>
-            <ThemedText style={[styles.name, { color: colors.ink }]}>Muneera Bass</ThemedText>
-            <ThemedText style={[styles.handle, { color: colors.muted }]}>Building a calmer note system</ThemedText>
+            <Text style={[styles.name, { color: c.text }]}>Muneera Bass</Text>
+            <Text style={[styles.role, { color: c.textSecondary }]}>Student</Text>
           </View>
-          <View style={[styles.editBadge, { borderColor: colors.line }]}
-            >
-            <IconSymbol name="square.and.pencil" size={16} color={colors.accentDeep} />
-            <ThemedText style={[styles.editText, { color: colors.accentDeep }]}>Edit</ThemedText>
-          </View>
-        </View>
-
-        <View style={[styles.tokenCard, { backgroundColor: colors.card, borderColor: colors.line }]}>
-          <ThemedText style={[styles.tokenLabel, { color: colors.muted }]}>Current token</ThemedText>
-          <ThemedText style={[styles.tokenValue, { color: colors.ink }]}>{token ?? 'No token'}</ThemedText>
-          <View style={styles.logoutButton}>
-            <ThemedText style={styles.logoutText} onPress={clearAuthToken}>
-              Logout
-            </ThemedText>
-          </View>
+          <Pressable style={[styles.editBtn, { backgroundColor: c.accentSoft }]}>
+            <IconSymbol name="pencil" size={16} color={c.accent} />
+          </Pressable>
         </View>
 
         <View style={styles.statsRow}>
-          {stats.map((stat) => (
-            <View key={stat.label} style={[styles.statCard, { backgroundColor: colors.card, borderColor: colors.line }]}
-              >
-              <ThemedText style={[styles.statValue, { color: colors.ink }]}>{stat.value}</ThemedText>
-              <ThemedText style={[styles.statLabel, { color: colors.muted }]}>{stat.label}</ThemedText>
+          {[
+            { val: '3', label: 'Uploads', icon: 'tray.and.arrow.up' },
+            { val: '12', label: 'Downloads', icon: 'arrow.down.circle' },
+            { val: '5', label: 'Saved', icon: 'bookmark' },
+          ].map((s) => (
+            <View key={s.label} style={[styles.statCard, { backgroundColor: c.card, borderColor: c.border }]}>
+              <IconSymbol name={s.icon as any} size={18} color={c.accent} />
+              <Text style={[styles.statVal, { color: c.text }]}>{s.val}</Text>
+              <Text style={[styles.statLabel, { color: c.textSecondary }]}>{s.label}</Text>
             </View>
           ))}
         </View>
 
-        <View style={[styles.insightCard, { backgroundColor: colors.card, borderColor: colors.line }]}
-          >
-          <View style={styles.insightHeader}>
-            <ThemedText style={[styles.sectionTitle, { color: colors.ink }]}>Weekly insight</ThemedText>
-            <IconSymbol name="sparkles" size={18} color={colors.accentDeep} />
-          </View>
-          <ThemedText style={[styles.insightBody, { color: colors.muted }]}
-            >You capture the most ideas on Tuesday afternoons. Plan your focus block there.</ThemedText>
+        <Text style={[styles.sectionLabel, { color: c.textSecondary }]}>Account</Text>
+        <View style={[styles.menuCard, { backgroundColor: c.card, borderColor: c.border }]}>
+          {accountItems.map((item, i) => renderItem(item, i === accountItems.length - 1))}
         </View>
 
-        <View style={styles.sectionHeader}>
-          <ThemedText style={[styles.sectionTitle, { color: colors.ink }]}>Habit goals</ThemedText>
-          <ThemedText style={[styles.sectionLink, { color: colors.accentDeep }]}>Adjust</ThemedText>
+        <Text style={[styles.sectionLabel, { color: c.textSecondary }]}>App</Text>
+        <View style={[styles.menuCard, { backgroundColor: c.card, borderColor: c.border }]}>
+          {appItems.map((item, i) => renderItem(item, i === appItems.length - 1))}
         </View>
 
-        {habits.map((habit) => (
-          <View key={habit.label} style={[styles.habitCard, { backgroundColor: colors.card, borderColor: colors.line }]}
-            >
-            <View style={styles.habitRow}>
-              <ThemedText style={[styles.habitLabel, { color: colors.ink }]}>{habit.label}</ThemedText>
-              <ThemedText style={[styles.habitPercent, { color: colors.muted }]}> 
-                {Math.round(habit.value * 100)}%
-              </ThemedText>
-            </View>
-            <View style={[styles.progressTrack, { backgroundColor: colors.line }]}
-              >
-              <View style={[styles.progressFill, { width: `${habit.value * 100}%`, backgroundColor: colors.accentDeep }]} />
-            </View>
-          </View>
-        ))}
+        <Pressable
+          style={[styles.logoutBtn, { backgroundColor: c.danger + '10', borderColor: c.danger + '25' }]}
+          onPress={clearAuthToken}
+        >
+          <IconSymbol name="arrow.right.square" size={18} color={c.danger} />
+          <Text style={[styles.logoutText, { color: c.danger }]}>Log out</Text>
+        </Pressable>
+
+        <View style={{ height: 100 }} />
       </ScrollView>
-    </ThemedView>
+    </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
-  page: {
-    flex: 1,
+  safe: { flex: 1 },
+  scroll: {
+    paddingHorizontal: 20,
+    paddingTop: 12,
   },
-  content: {
-    padding: 24,
-    paddingTop: 44,
-    gap: 20,
-  },
-  glow: {
-    position: 'absolute',
-    borderRadius: 999,
-    opacity: 0.5,
-  },
-  glowOne: {
-    width: 220,
-    height: 220,
-    top: -70,
-    left: -80,
-  },
-  glowTwo: {
-    width: 180,
-    height: 180,
-    right: -60,
-    top: 140,
+  title: {
+    fontSize: 24,
+    fontFamily: Fonts.bold,
+    letterSpacing: -0.3,
+    marginBottom: 20,
   },
   profileCard: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 16,
+    gap: 14,
     padding: 16,
-    borderRadius: 20,
+    borderRadius: 18,
     borderWidth: 1,
+    marginBottom: 20,
   },
   avatar: {
-    width: 60,
-    height: 60,
+    width: 56,
+    height: 56,
     borderRadius: 18,
     alignItems: 'center',
     justifyContent: 'center',
   },
+  avatarText: {
+    color: '#FFF',
+    fontSize: 22,
+    fontFamily: Fonts.bold,
+  },
   profileInfo: {
     flex: 1,
-    gap: 6,
+    gap: 2,
   },
   name: {
     fontSize: 18,
-    fontFamily: Fonts.serif,
+    fontFamily: Fonts.bold,
   },
-  handle: {
-    fontSize: 12,
-  },
-  editBadge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    borderRadius: 999,
-    borderWidth: 1,
-  },
-  editText: {
-    fontSize: 11,
-    fontFamily: Fonts.rounded,
-  },
-  tokenCard: {
-    padding: 14,
-    borderRadius: 16,
-    borderWidth: 1,
-    gap: 10,
-  },
-  tokenLabel: {
-    fontSize: 12,
-    fontFamily: Fonts.rounded,
-  },
-  tokenValue: {
+  role: {
     fontSize: 13,
+    fontFamily: Fonts.regular,
   },
-  logoutButton: {
-    alignSelf: 'flex-start',
-    backgroundColor: '#111827',
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderRadius: 10,
-  },
-  logoutText: {
-    color: '#ffffff',
-    fontSize: 12,
-    fontFamily: Fonts.rounded,
+  editBtn: {
+    width: 38,
+    height: 38,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   statsRow: {
     flexDirection: 'row',
-    gap: 12,
+    gap: 10,
+    marginBottom: 28,
   },
   statCard: {
     flex: 1,
-    padding: 14,
-    borderRadius: 16,
-    borderWidth: 1,
     alignItems: 'center',
-    gap: 4,
+    paddingVertical: 16,
+    borderRadius: 14,
+    borderWidth: 1,
+    gap: 6,
   },
-  statValue: {
-    fontSize: 18,
-    fontFamily: Fonts.rounded,
+  statVal: {
+    fontSize: 20,
+    fontFamily: Fonts.bold,
   },
   statLabel: {
+    fontSize: 11,
+    fontFamily: Fonts.medium,
+  },
+  sectionLabel: {
     fontSize: 12,
+    fontFamily: Fonts.bold,
+    textTransform: 'uppercase',
+    letterSpacing: 0.6,
+    marginBottom: 10,
   },
-  insightCard: {
-    padding: 16,
-    borderRadius: 18,
-    borderWidth: 1,
-    gap: 10,
-  },
-  insightHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-  },
-  insightBody: {
-    fontSize: 13,
-    lineHeight: 18,
-  },
-  sectionHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-  },
-  sectionTitle: {
-    fontSize: 18,
-    fontFamily: Fonts.serif,
-  },
-  sectionLink: {
-    fontSize: 12,
-    fontFamily: Fonts.rounded,
-  },
-  habitCard: {
-    padding: 14,
+  menuCard: {
     borderRadius: 16,
     borderWidth: 1,
-    gap: 10,
+    overflow: 'hidden',
+    marginBottom: 24,
   },
-  habitRow: {
+  menuItem: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
+    gap: 14,
+    paddingVertical: 14,
+    paddingHorizontal: 16,
   },
-  habitLabel: {
-    fontSize: 14,
-    fontFamily: Fonts.rounded,
+  menuIcon: {
+    width: 36,
+    height: 36,
+    borderRadius: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
-  habitPercent: {
+  menuContent: {
+    flex: 1,
+    gap: 1,
+  },
+  menuLabel: {
+    fontSize: 15,
+    fontFamily: Fonts.medium,
+  },
+  menuSub: {
     fontSize: 12,
+    fontFamily: Fonts.regular,
   },
-  progressTrack: {
-    height: 8,
-    borderRadius: 999,
-    overflow: 'hidden',
+  logoutBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    paddingVertical: 15,
+    borderRadius: 14,
+    borderWidth: 1,
   },
-  progressFill: {
-    height: 8,
-    borderRadius: 999,
+  logoutText: {
+    fontSize: 15,
+    fontFamily: Fonts.semiBold,
   },
 });

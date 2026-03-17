@@ -1,305 +1,536 @@
-import { ScrollView, StyleSheet, View } from 'react-native';
+import { useCallback, useEffect, useState } from 'react';
+import {
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  View,
+  Pressable,
+  Linking,
+} from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
+import { router } from 'expo-router';
+import { useFocusEffect } from '@react-navigation/native';
 
-import { ThemedText } from '@/components/themed-text';
-import { ThemedView } from '@/components/themed-view';
 import { IconSymbol } from '@/components/ui/icon-symbol';
-import { Fonts } from '@/constants/theme';
+import { Colors, Fonts, SEMESTER_COLORS, SUBJECTS } from '@/constants/theme';
 import { useColorScheme } from '@/hooks/use-color-scheme';
+import { getBookmarkedNotes, toggleBookmarkedNote } from '@/lib/bookmarks';
+import { firestore } from '@/lib/firebase';
 
-const palette = {
-  light: {
-    background: '#F7F4EF',
-    ink: '#1F1C16',
-    muted: '#6B6358',
-    card: '#FFFFFF',
-    accent: '#FFB566',
-    accentSoft: '#FFF1E0',
-    accentDeep: '#E37B23',
-    line: '#EEE5D8',
-    orb1: '#FFD6A5',
-    orb2: '#FBE7C5',
-  },
-  dark: {
-    background: '#151312',
-    ink: '#F7F2EA',
-    muted: '#B7AEA2',
-    card: '#1E1B19',
-    accent: '#FFB566',
-    accentSoft: '#3A2C1E',
-    accentDeep: '#F08A2B',
-    line: '#2B2623',
-    orb1: '#3D2A1A',
-    orb2: '#2B2016',
-  },
+export type NoteDoc = {
+  id: string;
+  name: string;
+  subject: string;
+  semester: number;
+  year: number;
+  uploadedBy: string;
+  likes: number;
+  fileUrl: string;
+  createdAt: { toDate: () => Date } | null;
 };
 
-const quickActions = [
-  { label: 'New Note', sub: 'Blank page', icon: 'square.and.pencil' },
-  { label: 'Checklist', sub: 'Get it done', icon: 'checklist' },
-  { label: 'Spark', sub: 'Voice capture', icon: 'sparkles' },
+const SEMESTER_LABELS = [
+  'Semester 1',
+  'Semester 2',
+  'Semester 3',
+  'Semester 4',
+  'Semester 5',
+  'Semester 6',
+  'Semester 7',
+  'Semester 8',
 ];
 
-const recentNotes = [
-  { title: 'Brand refresh ideas', meta: 'Edited 12m ago' },
-  { title: 'Onboarding flow', meta: 'Edited yesterday' },
-  { title: 'Meeting snapshots', meta: 'Edited Feb 6' },
-];
+function formatNoteDate(date: Date): string {
+  const now = new Date();
+  const diff = now.getTime() - date.getTime();
+  const days = Math.floor(diff / (24 * 60 * 60 * 1000));
+  if (days === 0) return 'Today';
+  if (days === 1) return 'Yesterday';
+  if (days < 7) return `${days} days ago`;
+  return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+}
+
+function getFileTypeFromUrl(url: string): string {
+  const lower = url.toLowerCase();
+  if (lower.includes('.pdf')) return 'PDF';
+  if (lower.includes('.doc')) return 'DOCX';
+  if (lower.includes('.jpg') || lower.includes('.jpeg') || lower.includes('.png')) return 'Image';
+  return 'File';
+}
 
 export default function HomeScreen() {
   const scheme = useColorScheme() ?? 'light';
-  const colors = palette[scheme];
+  const c = Colors[scheme];
+  const [recentNotes, setRecentNotes] = useState<NoteDoc[]>([]);
+  const [semesterCounts, setSemesterCounts] = useState<number[]>(() =>
+    Array(8).fill(0)
+  );
+  const [loading, setLoading] = useState(true);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [bookmarkedIds, setBookmarkedIds] = useState<string[]>([]);
+
+  const loadBookmarks = useCallback(async () => {
+    const bookmarks = await getBookmarkedNotes();
+    setBookmarkedIds(bookmarks.map((note) => note.id));
+  }, []);
+
+  useFocusEffect(
+    useCallback(() => {
+      loadBookmarks();
+    }, [loadBookmarks])
+  );
+
+  useEffect(() => {
+    const unsubRecent = firestore()
+      .collection('notes')
+      .orderBy('createdAt', 'desc')
+      .limit(10)
+      .onSnapshot(
+        (snapshot) => {
+          const notes: NoteDoc[] = snapshot.docs.map((doc) => {
+            const d = doc.data();
+            return {
+              id: doc.id,
+              name: d.name ?? '',
+              subject: d.subject ?? '',
+              semester: d.semester ?? 1,
+              year: d.year ?? 0,
+              uploadedBy: d.uploadedBy ?? '',
+              likes: d.likes ?? 0,
+              fileUrl: d.fileUrl ?? '',
+              createdAt: d.createdAt ?? null,
+            };
+          });
+          setRecentNotes(notes);
+        },
+        (err) => {
+          console.error('[home] recent notes error', err);
+          setRecentNotes([]);
+        }
+      );
+
+    // Semester counts: fetch in background, never block UI
+    firestore()
+      .collection('notes')
+      .orderBy('createdAt', 'desc')
+      .limit(300)
+      .get()
+      .then((snapshot) => {
+        const counts = Array(8).fill(0);
+        snapshot.docs.forEach((doc) => {
+          const sem = (doc.data().semester as number) ?? 1;
+          if (sem >= 1 && sem <= 8) counts[sem - 1]++;
+        });
+        setSemesterCounts(counts);
+      })
+      .catch((err) => {
+        console.error('[home] semester counts error', err);
+      })
+      .finally(() => setLoading(false));
+
+    // Safety: stop loading after 5s if Firestore never responds
+    const timeout = setTimeout(() => setLoading(false), 5000);
+    return () => {
+      unsubRecent();
+      clearTimeout(timeout);
+    };
+  }, []);
+
+  const handleToggleBookmark = async (note: NoteDoc) => {
+    const next = await toggleBookmarkedNote({
+      ...note,
+      createdAt: note.createdAt?.toDate?.().toISOString() ?? null,
+    });
+    setBookmarkedIds(next.map((item) => item.id));
+  };
 
   return (
-    <ThemedView style={[styles.page, { backgroundColor: colors.background }]}
-      lightColor={palette.light.background}
-      darkColor={palette.dark.background}>
-      <View style={[styles.orb, styles.orbOne, { backgroundColor: colors.orb1 }]} />
-      <View style={[styles.orb, styles.orbTwo, { backgroundColor: colors.orb2 }]} />
-
-      <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
-        <View style={styles.heroRow}>
-          <View style={styles.heroText}>
-            <ThemedText style={[styles.kicker, { color: colors.muted }]}>Welcome back</ThemedText>
-            <ThemedText style={[styles.title, { color: colors.ink }]}>NotesNest</ThemedText>
-            <ThemedText style={[styles.subtitle, { color: colors.muted }]}>
-              Your ideas, gently organized and ready to ship.
-            </ThemedText>
+    <SafeAreaView style={[styles.safe, { backgroundColor: c.background }]}>
+      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scroll}>
+        <View style={styles.header}>
+          <View style={[styles.logo, { backgroundColor: c.accent }]}>
+            <IconSymbol name="note.text" size={18} color="#FFF" />
           </View>
-          <View style={[styles.heroBadge, { backgroundColor: colors.accentSoft, borderColor: colors.accent }]}
-            >
-            <IconSymbol name="sparkles" size={22} color={colors.accentDeep} />
-            <ThemedText style={[styles.badgeText, { color: colors.accentDeep }]}>7-day streak</ThemedText>
-          </View>
-        </View>
-
-        <View style={styles.sectionHeader}>
-          <ThemedText style={[styles.sectionTitle, { color: colors.ink }]}>Quick actions</ThemedText>
-          <ThemedText style={[styles.sectionLink, { color: colors.accentDeep }]}>Customize</ThemedText>
-        </View>
-
-        <View style={styles.actionGrid}>
-          {quickActions.map((item) => (
-            <View
-              key={item.label}
-              style={[
-                styles.actionCard,
-                { backgroundColor: colors.card, borderColor: colors.line },
-              ]}>
-              <View style={[styles.actionIcon, { backgroundColor: colors.accentSoft }]}
-                >
-                <IconSymbol name={item.icon} size={20} color={colors.accentDeep} />
-              </View>
-              <ThemedText style={[styles.actionTitle, { color: colors.ink }]}>{item.label}</ThemedText>
-              <ThemedText style={[styles.actionSub, { color: colors.muted }]}>{item.sub}</ThemedText>
-            </View>
-          ))}
-        </View>
-
-        <View style={[styles.featureCard, { backgroundColor: colors.card, borderColor: colors.line }]}
+          <Text style={[styles.appName, { color: c.text }]}>NotesNest</Text>
+          <View style={{ flex: 1 }} />
+          <Pressable style={[styles.headerBtn, { backgroundColor: c.card, borderColor: c.border }]}>
+            <IconSymbol name="bell" size={20} color={c.textSecondary} />
+          </Pressable>
+          <Pressable
+            style={[styles.avatarSmall, { backgroundColor: c.accent }]}
+            onPress={() => router.navigate('/(tabs)/profile')}
           >
-          <View style={styles.featureHeader}>
-            <View>
-              <ThemedText style={[styles.featureTitle, { color: colors.ink }]}>Today’s focus</ThemedText>
-              <ThemedText style={[styles.featureSub, { color: colors.muted }]}
-                >Pick one note to refine this afternoon.</ThemedText>
-            </View>
-            <View style={[styles.featureBadge, { backgroundColor: colors.accent }]}
-              >
-              <ThemedText style={styles.featureBadgeText}>2h</ThemedText>
-            </View>
-          </View>
-          <View style={[styles.featureChip, { borderColor: colors.line }]}
-            >
-            <IconSymbol name="folder.fill" size={16} color={colors.accentDeep} />
-            <ThemedText style={[styles.featureChipText, { color: colors.muted }]}
-              >Client strategy / Launch</ThemedText>
+            <Text style={styles.avatarSmallText}>M</Text>
+          </Pressable>
+        </View>
+
+        <View style={styles.greetSection}>
+          <Text style={[styles.greeting, { color: c.text }]}>Hi, Muneera</Text>
+          <Text style={[styles.greetSub, { color: c.textSecondary }]}>
+            Find the best notes for your exams.
+          </Text>
+        </View>
+
+        <View style={[styles.searchBox, { backgroundColor: c.card, borderColor: c.border }]}>
+          <IconSymbol name="magnifyingglass" size={18} color={c.muted} />
+          <TextInput
+            style={[styles.searchInput, { color: c.text }]}
+            placeholder="Search notes, PYQs, labs..."
+            placeholderTextColor={c.muted}
+            value={searchQuery}
+            onChangeText={setSearchQuery}
+          />
+          <View style={[styles.filterIcon, { backgroundColor: c.accentSoft }]}>
+            <IconSymbol name="slider.horizontal.3" size={16} color={c.accent} />
           </View>
         </View>
 
         <View style={styles.sectionHeader}>
-          <ThemedText style={[styles.sectionTitle, { color: colors.ink }]}>Recent notes</ThemedText>
-          <ThemedText style={[styles.sectionLink, { color: colors.accentDeep }]}>See all</ThemedText>
+          <Text style={[styles.sectionTitle, { color: c.text }]}>Quick Access</Text>
+          <Pressable onPress={() => router.push('/notes-list')}>
+            <Text style={[styles.sectionLink, { color: c.accent }]}>View all</Text>
+          </Pressable>
         </View>
 
-        {recentNotes.map((note) => (
-          <View key={note.title} style={[styles.noteRow, { borderColor: colors.line }]}
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          contentContainerStyle={styles.subjectsRow}
+        >
+          {SUBJECTS.map((subj) => {
+            const subjColor = c[subj.colorKey as keyof typeof c] as string;
+            return (
+              <Pressable
+                key={subj.key}
+                style={styles.subjectItem}
+                onPress={() => router.push(`/notes-list?subject=${encodeURIComponent(subj.key)}`)}
+              >
+                <View style={[styles.subjectCircle, { backgroundColor: subjColor + '18' }]}>
+                  <IconSymbol name={subj.icon as any} size={24} color={subjColor} />
+                </View>
+                <Text style={[styles.subjectLabel, { color: c.textSecondary }]}>
+                  {subj.key.toUpperCase()}
+                </Text>
+              </Pressable>
+            );
+          })}
+        </ScrollView>
+
+        <View style={styles.sectionHeader}>
+          <Text style={[styles.sectionTitle, { color: c.text }]}>Browse by Semester</Text>
+        </View>
+
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          contentContainerStyle={styles.semRow}
+        >
+          {SEMESTER_LABELS.map((label, i) => (
+            <Pressable
+              key={label}
+              style={[styles.semCard, { backgroundColor: c.card, borderColor: c.border }]}
+              onPress={() => router.push(`/notes-list?semester=${i + 1}`)}
             >
-            <View style={[styles.noteDot, { backgroundColor: colors.accent }]} />
-            <View style={styles.noteInfo}>
-              <ThemedText style={[styles.noteTitle, { color: colors.ink }]}>{note.title}</ThemedText>
-              <ThemedText style={[styles.noteMeta, { color: colors.muted }]}>{note.meta}</ThemedText>
-            </View>
-            <IconSymbol name="chevron.right" size={18} color={colors.muted} />
+              <View
+                style={[
+                  styles.semAccent,
+                  { backgroundColor: (SEMESTER_COLORS[i] ?? SEMESTER_COLORS[0]) + '15' },
+                ]}
+              >
+                <IconSymbol
+                  name="folder.fill"
+                  size={20}
+                  color={SEMESTER_COLORS[i] ?? SEMESTER_COLORS[0]}
+                />
+              </View>
+              <Text style={[styles.semLabel, { color: c.text }]}>{label}</Text>
+              <Text style={[styles.semCount, { color: c.textSecondary }]}>
+                {loading ? '...' : `${semesterCounts[i] ?? 0} notes`}
+              </Text>
+            </Pressable>
+          ))}
+        </ScrollView>
+
+        <View style={styles.sectionHeader}>
+          <Text style={[styles.sectionTitle, { color: c.text }]}>Recently Added</Text>
+          <Pressable onPress={() => router.push('/notes-list')}>
+            <Text style={[styles.sectionLink, { color: c.accent }]}>See all</Text>
+          </Pressable>
+        </View>
+
+        {recentNotes.length === 0 ? (
+          <View style={[styles.emptyCard, { backgroundColor: c.card, borderColor: c.border }]}>
+            <IconSymbol name="doc.text" size={32} color={c.muted} />
+            <Text style={[styles.emptyText, { color: c.textSecondary }]}>
+              No notes yet. Be the first to upload!
+            </Text>
           </View>
-        ))}
+        ) : (
+          recentNotes.map((note) => {
+            const dateStr = note.createdAt
+              ? formatNoteDate(note.createdAt.toDate())
+              : 'Recently';
+            const fileType = getFileTypeFromUrl(note.fileUrl);
+            const isBookmarked = bookmarkedIds.includes(note.id);
+            return (
+              <Pressable
+                key={note.id}
+                style={[styles.recentCard, { backgroundColor: c.card, borderColor: c.border }]}
+                onPress={() => note.fileUrl && Linking.openURL(note.fileUrl)}
+              >
+                <View style={[styles.fileThumb, { backgroundColor: c.accentSoft }]}>
+                  <IconSymbol name="doc.text.fill" size={22} color={c.accent} />
+                </View>
+                <View style={styles.recentInfo}>
+                  <Text style={[styles.recentTitle, { color: c.text }]} numberOfLines={1}>
+                    {note.name}
+                  </Text>
+                  <View style={styles.recentMeta}>
+                    <View
+                      style={[
+                        styles.typeBadge,
+                        {
+                          backgroundColor:
+                            fileType === 'PDF' ? '#FF3B3015' : '#007AFF15',
+                        },
+                      ]}
+                    >
+                      <Text
+                        style={[
+                          styles.typeBadgeText,
+                          { color: fileType === 'PDF' ? '#FF3B30' : '#007AFF' },
+                        ]}
+                      >
+                        {fileType}
+                      </Text>
+                    </View>
+                    <Text style={[styles.recentDate, { color: c.textSecondary }]}>
+                      {note.subject}
+                    </Text>
+                    <View style={[styles.dot, { backgroundColor: c.muted }]} />
+                    <Text style={[styles.recentDate, { color: c.textSecondary }]}>
+                      {dateStr}
+                    </Text>
+                  </View>
+                </View>
+                <Pressable hitSlop={8} onPress={() => handleToggleBookmark(note)}>
+                  <IconSymbol
+                    name={isBookmarked ? 'bookmark.fill' : 'bookmark'}
+                    size={20}
+                    color={isBookmarked ? c.accent : c.muted}
+                  />
+                </Pressable>
+              </Pressable>
+            );
+          })
+        )}
+
+        <View style={{ height: 100 }} />
       </ScrollView>
-    </ThemedView>
+    </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
-  page: {
-    flex: 1,
-  },
-  content: {
-    padding: 24,
-    paddingTop: 48,
-    gap: 20,
-  },
-  orb: {
-    position: 'absolute',
-    borderRadius: 999,
-    opacity: 0.55,
-  },
-  orbOne: {
-    width: 220,
-    height: 220,
-    top: -60,
-    right: -80,
-  },
-  orbTwo: {
-    width: 180,
-    height: 180,
-    top: 120,
-    left: -90,
-  },
-  heroRow: {
+  safe: { flex: 1 },
+  scroll: { paddingHorizontal: 20 },
+  header: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 18,
+    gap: 10,
+    paddingTop: 8,
+    paddingBottom: 12,
   },
-  heroText: {
-    flex: 1,
-    gap: 8,
+  logo: {
+    width: 34,
+    height: 34,
+    borderRadius: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
-  kicker: {
-    fontSize: 13,
-    textTransform: 'uppercase',
-    letterSpacing: 1,
-    fontFamily: Fonts.rounded,
+  appName: {
+    fontSize: 18,
+    fontFamily: Fonts.bold,
   },
-  title: {
-    fontSize: 34,
-    fontFamily: Fonts.serif,
-    letterSpacing: -0.5,
-  },
-  subtitle: {
-    fontSize: 16,
-    lineHeight: 22,
-  },
-  heroBadge: {
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    borderRadius: 16,
+  headerBtn: {
+    width: 38,
+    height: 38,
+    borderRadius: 12,
     borderWidth: 1,
     alignItems: 'center',
-    gap: 6,
+    justifyContent: 'center',
   },
-  badgeText: {
-    fontSize: 12,
-    fontFamily: Fonts.rounded,
+  avatarSmall: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  avatarSmallText: {
+    color: '#FFF',
+    fontFamily: Fonts.bold,
+    fontSize: 14,
+  },
+  greetSection: {
+    paddingTop: 8,
+    paddingBottom: 18,
+    gap: 4,
+  },
+  greeting: {
+    fontSize: 24,
+    fontFamily: Fonts.bold,
+    letterSpacing: -0.3,
+  },
+  greetSub: {
+    fontSize: 15,
+    fontFamily: Fonts.regular,
+  },
+  searchBox: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    borderWidth: 1,
+    borderRadius: 14,
+    paddingLeft: 16,
+    paddingRight: 6,
+    height: 48,
+    marginBottom: 24,
+  },
+  searchInput: {
+    flex: 1,
+    fontSize: 14,
+    fontFamily: Fonts.regular,
+  },
+  filterIcon: {
+    width: 36,
+    height: 36,
+    borderRadius: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   sectionHeader: {
     flexDirection: 'row',
-    alignItems: 'center',
     justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 14,
   },
   sectionTitle: {
     fontSize: 18,
-    fontFamily: Fonts.serif,
+    fontFamily: Fonts.bold,
   },
   sectionLink: {
-    fontSize: 13,
-    fontFamily: Fonts.rounded,
+    fontSize: 14,
+    fontFamily: Fonts.semiBold,
   },
-  actionGrid: {
-    flexDirection: 'row',
-    gap: 12,
+  subjectsRow: {
+    gap: 20,
+    paddingBottom: 24,
   },
-  actionCard: {
-    flex: 1,
-    padding: 14,
+  subjectItem: {
+    alignItems: 'center',
+    gap: 8,
+    width: 64,
+  },
+  subjectCircle: {
+    width: 56,
+    height: 56,
     borderRadius: 18,
-    borderWidth: 1,
-    gap: 6,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
-  actionIcon: {
-    width: 34,
-    height: 34,
+  subjectLabel: {
+    fontSize: 10,
+    fontFamily: Fonts.bold,
+    letterSpacing: 0.5,
+  },
+  loadingRow: {
+    paddingVertical: 24,
+    alignItems: 'center',
+  },
+  semRow: {
+    gap: 12,
+    paddingBottom: 24,
+  },
+  semCard: {
+    width: 150,
+    padding: 16,
+    borderRadius: 16,
+    borderWidth: 1,
+    gap: 10,
+  },
+  semAccent: {
+    width: 40,
+    height: 40,
     borderRadius: 12,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  actionTitle: {
+  semLabel: {
     fontSize: 15,
-    fontFamily: Fonts.rounded,
+    fontFamily: Fonts.semiBold,
   },
-  actionSub: {
+  semCount: {
     fontSize: 12,
+    fontFamily: Fonts.regular,
   },
-  featureCard: {
-    padding: 18,
-    borderRadius: 22,
-    borderWidth: 1,
+  recentCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
     gap: 14,
+    padding: 14,
+    borderRadius: 14,
+    borderWidth: 1,
+    marginBottom: 10,
   },
-  featureHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'flex-start',
-  },
-  featureTitle: {
-    fontSize: 18,
-    fontFamily: Fonts.serif,
-  },
-  featureSub: {
-    fontSize: 13,
-    marginTop: 6,
-  },
-  featureBadge: {
-    paddingHorizontal: 10,
-    paddingVertical: 6,
+  fileThumb: {
+    width: 48,
+    height: 48,
     borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
-  featureBadgeText: {
-    fontSize: 12,
-    fontFamily: Fonts.rounded,
-    color: '#1E1B19',
+  recentInfo: {
+    flex: 1,
+    gap: 6,
   },
-  featureChip: {
+  recentTitle: {
+    fontSize: 14,
+    fontFamily: Fonts.semiBold,
+  },
+  recentMeta: {
     flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  typeBadge: {
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 4,
+  },
+  typeBadgeText: {
+    fontSize: 10,
+    fontFamily: Fonts.bold,
+  },
+  recentDate: {
+    fontSize: 12,
+    fontFamily: Fonts.regular,
+  },
+  dot: {
+    width: 3,
+    height: 3,
+    borderRadius: 2,
+  },
+  emptyCard: {
+    padding: 24,
+    borderRadius: 14,
+    borderWidth: 1,
     alignItems: 'center',
     gap: 8,
-    borderWidth: 1,
-    borderRadius: 999,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
   },
-  featureChipText: {
-    fontSize: 13,
-  },
-  noteRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    borderWidth: 1,
-    borderRadius: 16,
-    padding: 14,
-    gap: 12,
-  },
-  noteDot: {
-    width: 10,
-    height: 10,
-    borderRadius: 999,
-  },
-  noteInfo: {
-    flex: 1,
-    gap: 2,
-  },
-  noteTitle: {
-    fontSize: 15,
-    fontFamily: Fonts.rounded,
-  },
-  noteMeta: {
-    fontSize: 12,
+  emptyText: {
+    fontSize: 14,
+    fontFamily: Fonts.regular,
   },
 });
