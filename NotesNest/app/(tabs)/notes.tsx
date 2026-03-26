@@ -1,280 +1,384 @@
-import { ScrollView, StyleSheet, View } from 'react-native';
+import { useEffect, useState } from 'react';
+import {
+  ActivityIndicator,
+  Alert,
+  FlatList,
+  Pressable,
+  StyleSheet,
+  Text,
+  View,
+  Linking,
+} from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 
-import { ThemedText } from '@/components/themed-text';
-import { ThemedView } from '@/components/themed-view';
 import { IconSymbol } from '@/components/ui/icon-symbol';
-import { Fonts } from '@/constants/theme';
+import { Colors, Fonts, SEMESTERS } from '@/constants/theme';
 import { useColorScheme } from '@/hooks/use-color-scheme';
+import { firestore } from '@/lib/firebase';
+import { getAuth } from '@react-native-firebase/auth';
 
-const palette = {
-  light: {
-    background: '#F6F3F0',
-    ink: '#1C1815',
-    muted: '#6A635D',
-    card: '#FFFFFF',
-    accent: '#9FD5D4',
-    accentDeep: '#2F7D7A',
-    line: '#E8DED4',
-    chip: '#F0E6DC',
-  },
-  dark: {
-    background: '#141210',
-    ink: '#F6F0E8',
-    muted: '#B0A69E',
-    card: '#1E1A17',
-    accent: '#2F7D7A',
-    accentDeep: '#9FD5D4',
-    line: '#2A2622',
-    chip: '#231F1C',
-  },
+type MyNote = {
+  id: string;
+  name: string;
+  subject: string;
+  semester: number;
+  year: number;
+  likes: number;
+  fileUrl: string;
+  createdAt: { toDate: () => Date } | null;
 };
 
-const filters = ['All', 'Personal', 'Work', 'Ideas', 'Pinned'];
-const notes = [
-  {
-    title: 'New landing page copy',
-    preview: 'Lean into clarity. Highlight the timeline and benefits upfront.',
-    tag: 'Work',
-    time: 'Updated 2h ago',
-  },
-  {
-    title: 'Weekend reset list',
-    preview: 'Laundry, inbox zero, plant care, and a short reflection walk.',
-    tag: 'Personal',
-    time: 'Updated yesterday',
-  },
-  {
-    title: 'Product narrative beats',
-    preview: 'Problem framing, promise, proof, and the next chapter.',
-    tag: 'Ideas',
-    time: 'Updated Feb 4',
-  },
-];
+const TYPE_COLORS: Record<string, { bg: string; text: string }> = {
+  PDF: { bg: '#FF3B3012', text: '#FF3B30' },
+  DOCX: { bg: '#007AFF12', text: '#007AFF' },
+  Image: { bg: '#34C75912', text: '#34C759' },
+  File: { bg: '#8E8E9312', text: '#8E8E93' },
+};
 
-export default function NotesScreen() {
+function getFileTypeFromUrl(url: string): 'PDF' | 'DOCX' | 'Image' | 'File' {
+  const lower = url.toLowerCase();
+  if (lower.includes('.pdf')) return 'PDF';
+  if (lower.includes('.doc')) return 'DOCX';
+  if (lower.includes('.jpg') || lower.includes('.jpeg') || lower.includes('.png')) return 'Image';
+  return 'File';
+}
+
+function formatDate(date: Date): string {
+  return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+}
+
+export default function MyNotesScreen() {
   const scheme = useColorScheme() ?? 'light';
-  const colors = palette[scheme];
+  const c = Colors[scheme];
+  const [notes, setNotes] = useState<MyNote[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  const uid = getAuth().currentUser?.uid ?? null;
+
+  useEffect(() => {
+    setLoading(true);
+
+    if (!uid) {
+      setNotes([]);
+      setLoading(false);
+      return;
+    }
+
+    // Query without orderBy to avoid composite index; sort in memory
+    const unsubscribe = firestore()
+      .collection('notes')
+      .where('uploadedBy', '==', uid)
+      .onSnapshot(
+        (snapshot) => {
+          const list: MyNote[] = snapshot.docs
+            .map((doc) => {
+              const d = doc.data();
+              return {
+                id: doc.id,
+                name: d.name ?? '',
+                subject: d.subject ?? '',
+                semester: d.semester ?? 1,
+                year: d.year ?? 0,
+                likes: d.likes ?? 0,
+                fileUrl: d.fileUrl ?? '',
+                createdAt: d.createdAt ?? null,
+              };
+            })
+            .sort((a, b) => {
+              const tA = a.createdAt?.toDate?.()?.getTime() ?? 0;
+              const tB = b.createdAt?.toDate?.()?.getTime() ?? 0;
+              return tB - tA;
+            });
+          setNotes(list);
+          setLoading(false);
+        },
+        (err) => {
+          console.error('[my-notes] error', err);
+          setNotes([]);
+          setLoading(false);
+        }
+      );
+
+    const timeout = setTimeout(() => setLoading(false), 5000);
+
+    return () => {
+      clearTimeout(timeout);
+      unsubscribe();
+    };
+  }, [uid]);
+
+  const handleDelete = (note: MyNote) => {
+    Alert.alert(
+      'Delete note',
+      `Remove "${note.name}"? This cannot be undone.`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              await firestore().collection('notes').doc(note.id).delete();
+            } catch (e) {
+              Alert.alert('Error', 'Could not delete note.');
+            }
+          },
+        },
+      ]
+    );
+  };
+
+  if (loading) {
+    return (
+      <SafeAreaView style={[styles.safe, { backgroundColor: c.background }]}>
+        <View style={styles.loadingWrap}>
+          <ActivityIndicator size="large" color={c.accent} />
+          <Text style={[styles.loadingText, { color: c.textSecondary }]}>
+            Loading your notes...
+          </Text>
+        </View>
+      </SafeAreaView>
+    );
+  }
 
   return (
-    <ThemedView style={[styles.page, { backgroundColor: colors.background }]}
-      lightColor={palette.light.background}
-      darkColor={palette.dark.background}>
-      <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
-        <View style={styles.headerRow}>
-          <View>
-            <ThemedText style={[styles.title, { color: colors.ink }]}>Your notes</ThemedText>
-            <ThemedText style={[styles.subtitle, { color: colors.muted }]}
-              >3 drafts waiting for review.</ThemedText>
-          </View>
-          <View style={[styles.addButton, { backgroundColor: colors.accent }]}>
-            <IconSymbol name="square.and.pencil" size={20} color={colors.ink} />
-          </View>
+    <SafeAreaView style={[styles.safe, { backgroundColor: c.background }]}>
+      <View style={styles.header}>
+        <Text style={[styles.title, { color: c.text }]}>My Notes</Text>
+        <View style={[styles.countBadge, { backgroundColor: c.accentSoft }]}>
+          <Text style={[styles.countText, { color: c.accent }]}>{notes.length}</Text>
         </View>
+      </View>
 
-        <View style={[styles.search, { backgroundColor: colors.card, borderColor: colors.line }]}
-          >
-          <IconSymbol name="sparkles" size={18} color={colors.accentDeep} />
-          <ThemedText style={[styles.searchText, { color: colors.muted }]}>
-            Search by title, tag, or keyword
-          </ThemedText>
-        </View>
-
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.filterRow}
-          >
-          {filters.map((item, index) => (
-            <View
-              key={item}
-              style={[
-                styles.filterChip,
-                {
-                  backgroundColor: index === 0 ? colors.accent : colors.chip,
-                  borderColor: colors.line,
-                },
-              ]}>
-              <ThemedText
-                style={[
-                  styles.filterText,
-                  { color: index === 0 ? colors.ink : colors.muted },
-                ]}>
-                {item}
-              </ThemedText>
+      <FlatList
+        data={notes}
+        keyExtractor={(item) => item.id}
+        contentContainerStyle={styles.list}
+        showsVerticalScrollIndicator={false}
+        ListEmptyComponent={
+          <View style={styles.empty}>
+            <View style={[styles.emptyIcon, { backgroundColor: c.accentSoft }]}>
+              <IconSymbol name="tray.and.arrow.up.fill" size={32} color={c.accent} />
             </View>
-          ))}
-        </ScrollView>
-
-        <View style={styles.sectionHeader}>
-          <ThemedText style={[styles.sectionTitle, { color: colors.ink }]}>Pinned</ThemedText>
-          <ThemedText style={[styles.sectionLink, { color: colors.accentDeep }]}>Manage</ThemedText>
-        </View>
-
-        <View style={[styles.pinnedCard, { backgroundColor: colors.card, borderColor: colors.line }]}
-          >
-          <View style={styles.pinnedHeader}>
-            <IconSymbol name="bookmark.fill" size={18} color={colors.accentDeep} />
-            <ThemedText style={[styles.pinnedTitle, { color: colors.ink }]}>
-              Launch checklist
-            </ThemedText>
+            <Text style={[styles.emptyTitle, { color: c.text }]}>No uploads yet</Text>
+            <Text style={[styles.emptySub, { color: c.textSecondary }]}>
+              Upload your first notes to share with classmates
+            </Text>
           </View>
-          <ThemedText style={[styles.pinnedBody, { color: colors.muted }]}
-            >Finalize tasks, share with the team, and run a last QA sweep.</ThemedText>
-          <View style={[styles.pinnedFooter, { borderColor: colors.line }]}
-            >
-            <ThemedText style={[styles.pinnedMeta, { color: colors.muted }]}>12 items</ThemedText>
-            <ThemedText style={[styles.pinnedMeta, { color: colors.muted }]}>Due tomorrow</ThemedText>
-          </View>
-        </View>
+        }
+        renderItem={({ item }) => {
+          const fileType = getFileTypeFromUrl(item.fileUrl);
+          const tc = TYPE_COLORS[fileType] ?? TYPE_COLORS.File;
+          const dateStr = item.createdAt
+            ? formatDate(item.createdAt.toDate())
+            : '—';
+          const semLabel = item.semester >= 1 && item.semester <= 8
+            ? SEMESTERS[item.semester - 1]
+            : `Sem ${item.semester}`;
 
-        <View style={styles.sectionHeader}>
-          <ThemedText style={[styles.sectionTitle, { color: colors.ink }]}>Latest</ThemedText>
-          <ThemedText style={[styles.sectionLink, { color: colors.accentDeep }]}>Sort</ThemedText>
-        </View>
-
-        {notes.map((note) => (
-          <View key={note.title} style={[styles.noteCard, { backgroundColor: colors.card, borderColor: colors.line }]}
+          return (
+            <Pressable
+              style={[styles.noteCard, { backgroundColor: c.card, borderColor: c.border }]}
             >
-            <View style={styles.noteHeader}>
-              <ThemedText style={[styles.noteTitle, { color: colors.ink }]}>{note.title}</ThemedText>
-              <View style={[styles.tag, { borderColor: colors.line }]}
-                >
-                <ThemedText style={[styles.tagText, { color: colors.muted }]}>{note.tag}</ThemedText>
+              <View style={styles.cardRow}>
+                <View style={[styles.fileIcon, { backgroundColor: c.accentSoft }]}>
+                  <IconSymbol name="doc.text.fill" size={22} color={c.accent} />
+                </View>
+                <View style={styles.noteInfo}>
+                  <Text style={[styles.noteTitle, { color: c.text }]} numberOfLines={1}>
+                    {item.name}
+                  </Text>
+                  <View style={styles.noteMeta}>
+                    <View style={[styles.typeBadge, { backgroundColor: tc.bg }]}>
+                      <Text style={[styles.typeBadgeText, { color: tc.text }]}>{fileType}</Text>
+                    </View>
+                    <Text style={[styles.metaText, { color: c.textSecondary }]}>
+                      {item.subject}
+                    </Text>
+                  </View>
+                </View>
               </View>
-            </View>
-            <ThemedText style={[styles.notePreview, { color: colors.muted }]}>{note.preview}</ThemedText>
-            <ThemedText style={[styles.noteTime, { color: colors.muted }]}>{note.time}</ThemedText>
-          </View>
-        ))}
-      </ScrollView>
-    </ThemedView>
+
+              <View style={[styles.statsRow, { borderTopColor: c.border }]}>
+                <View style={styles.stat}>
+                  <IconSymbol name="heart.fill" size={14} color={c.muted} />
+                  <Text style={[styles.statText, { color: c.textSecondary }]}>
+                    {item.likes} likes
+                  </Text>
+                </View>
+                <View style={styles.stat}>
+                  <IconSymbol name="calendar" size={14} color={c.muted} />
+                  <Text style={[styles.statText, { color: c.textSecondary }]}>{dateStr}</Text>
+                </View>
+                <View style={styles.stat}>
+                  <IconSymbol name="graduationcap.fill" size={14} color={c.muted} />
+                  <Text style={[styles.statText, { color: c.textSecondary }]}>{semLabel}</Text>
+                </View>
+              </View>
+
+              <View style={styles.actions}>
+                <Pressable
+                  style={[styles.actionBtn, { borderColor: c.border }]}
+                  onPress={() => item.fileUrl && Linking.openURL(item.fileUrl)}
+                >
+                  <IconSymbol name="arrow.down.circle" size={14} color={c.accent} />
+                  <Text style={[styles.actionText, { color: c.accent }]}>Open</Text>
+                </Pressable>
+                <Pressable
+                  style={[styles.actionBtn, { borderColor: c.border }]}
+                  onPress={() => handleDelete(item)}
+                >
+                  <IconSymbol name="trash" size={14} color={c.danger} />
+                  <Text style={[styles.actionText, { color: c.danger }]}>Delete</Text>
+                </Pressable>
+              </View>
+            </Pressable>
+          );
+        }}
+        ItemSeparatorComponent={() => <View style={{ height: 12 }} />}
+      />
+    </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
-  page: {
+  safe: { flex: 1 },
+  loadingWrap: {
     flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 12,
   },
-  content: {
-    padding: 24,
-    paddingTop: 44,
-    gap: 20,
+  loadingText: {
+    fontSize: 14,
+    fontFamily: Fonts.regular,
   },
-  headerRow: {
+  header: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: 16,
+    gap: 10,
+    paddingHorizontal: 20,
+    paddingTop: 12,
+    paddingBottom: 16,
   },
   title: {
-    fontSize: 30,
-    fontFamily: Fonts.serif,
+    fontSize: 24,
+    fontFamily: Fonts.bold,
+    letterSpacing: -0.3,
   },
-  subtitle: {
-    fontSize: 14,
-    marginTop: 6,
+  countBadge: {
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 10,
   },
-  addButton: {
-    width: 44,
-    height: 44,
+  countText: {
+    fontSize: 13,
+    fontFamily: Fonts.bold,
+  },
+  list: {
+    paddingHorizontal: 20,
+    paddingBottom: 100,
+  },
+  noteCard: {
+    borderRadius: 16,
+    borderWidth: 1,
+    overflow: 'hidden',
+  },
+  cardRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 14,
+    padding: 16,
+  },
+  fileIcon: {
+    width: 48,
+    height: 48,
     borderRadius: 14,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  search: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-    borderRadius: 16,
-    borderWidth: 1,
-    paddingHorizontal: 14,
-    paddingVertical: 12,
-  },
-  searchText: {
-    fontSize: 13,
-  },
-  filterRow: {
-    gap: 10,
-    paddingRight: 12,
-  },
-  filterChip: {
-    paddingHorizontal: 14,
-    paddingVertical: 8,
-    borderRadius: 999,
-    borderWidth: 1,
-  },
-  filterText: {
-    fontSize: 12,
-    fontFamily: Fonts.rounded,
-  },
-  sectionHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-  },
-  sectionTitle: {
-    fontSize: 18,
-    fontFamily: Fonts.serif,
-  },
-  sectionLink: {
-    fontSize: 12,
-    fontFamily: Fonts.rounded,
-  },
-  pinnedCard: {
-    padding: 18,
-    borderRadius: 20,
-    borderWidth: 1,
-    gap: 12,
-  },
-  pinnedHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-  },
-  pinnedTitle: {
-    fontSize: 16,
-    fontFamily: Fonts.rounded,
-  },
-  pinnedBody: {
-    fontSize: 13,
-    lineHeight: 18,
-  },
-  pinnedFooter: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    paddingTop: 12,
-    borderTopWidth: 1,
-  },
-  pinnedMeta: {
-    fontSize: 12,
-  },
-  noteCard: {
-    padding: 16,
-    borderRadius: 18,
-    borderWidth: 1,
-    gap: 8,
-  },
-  noteHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: 12,
+  noteInfo: {
+    flex: 1,
+    gap: 6,
   },
   noteTitle: {
     fontSize: 15,
-    fontFamily: Fonts.rounded,
+    fontFamily: Fonts.semiBold,
   },
-  tag: {
+  noteMeta: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  typeBadge: {
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 4,
+  },
+  typeBadgeText: {
+    fontSize: 10,
+    fontFamily: Fonts.bold,
+  },
+  metaText: {
+    fontSize: 12,
+    fontFamily: Fonts.regular,
+  },
+  statsRow: {
+    flexDirection: 'row',
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    borderTopWidth: 1,
+    gap: 16,
+  },
+  stat: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+  },
+  statText: {
+    fontSize: 12,
+    fontFamily: Fonts.regular,
+  },
+  actions: {
+    flexDirection: 'row',
+    gap: 8,
+    paddingHorizontal: 16,
+    paddingBottom: 14,
+  },
+  actionBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+    borderRadius: 8,
     borderWidth: 1,
-    borderRadius: 999,
-    paddingHorizontal: 10,
-    paddingVertical: 4,
   },
-  tagText: {
-    fontSize: 11,
+  actionText: {
+    fontSize: 12,
+    fontFamily: Fonts.medium,
   },
-  notePreview: {
-    fontSize: 13,
-    lineHeight: 18,
+  empty: {
+    paddingTop: 80,
+    alignItems: 'center',
+    gap: 12,
   },
-  noteTime: {
-    fontSize: 11,
+  emptyIcon: {
+    width: 72,
+    height: 72,
+    borderRadius: 22,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 4,
+  },
+  emptyTitle: {
+    fontSize: 17,
+    fontFamily: Fonts.semiBold,
+  },
+  emptySub: {
+    fontSize: 14,
+    fontFamily: Fonts.regular,
+    textAlign: 'center',
+    paddingHorizontal: 40,
   },
 });

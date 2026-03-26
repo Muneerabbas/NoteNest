@@ -1,15 +1,19 @@
 import { Redirect } from 'expo-router';
 import { useState } from 'react';
 import {
+  ActivityIndicator,
   KeyboardAvoidingView,
   Platform,
   Pressable,
+  ScrollView,
   StyleSheet,
+  Text,
   TextInput,
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { ThemedText } from '@/components/themed-text';
+
+import { IconSymbol } from '@/components/ui/icon-symbol';
 import { Fonts } from '@/constants/theme';
 import { useAuth } from '@/context/auth-context';
 import {
@@ -26,41 +30,33 @@ export default function AuthScreen() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  if (!isHydrated) {
-    return null;
-  }
-
-  if (token) {
-    return <Redirect href="/(tabs)" />;
-  }
+  if (!isHydrated) return null;
+  if (token) return <Redirect href="/(tabs)" />;
 
   const onSubmit = async () => {
     setError(null);
-
     if (!email || !password) {
       setError('Email and password are required.');
       return;
     }
-
     if (mode === 'signup' && password !== confirmPassword) {
       setError('Passwords do not match.');
       return;
     }
-
     try {
       setIsSubmitting(true);
       const nextToken =
         mode === 'login'
           ? await loginWithFirebase(email, password)
           : await signupWithFirebase(email, password);
-
       setAuthToken(nextToken);
     } catch (submitError: unknown) {
       const message =
-        submitError instanceof Error ? submitError.message : 'Authentication failed. Please try again.';
+        submitError instanceof Error ? submitError.message : 'Authentication failed.';
       setError(message);
     } finally {
       setIsSubmitting(false);
@@ -68,66 +64,123 @@ export default function AuthScreen() {
   };
 
   return (
-    <SafeAreaView style={styles.safeArea}>
+    <SafeAreaView style={styles.safe}>
       <KeyboardAvoidingView
-        style={styles.container}
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-        <View style={styles.card}>
-          <ThemedText style={styles.title}>NotesNest</ThemedText>
-          <ThemedText style={styles.subtitle}>Sign in or create an account to open your tabs.</ThemedText>
+        style={styles.kav}
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+      >
+        <ScrollView
+          contentContainerStyle={styles.scroll}
+          keyboardShouldPersistTaps="handled"
+          showsVerticalScrollIndicator={false}
+        >
+          <View style={styles.logoArea}>
+            <View style={styles.logoCircle}>
+              <IconSymbol name="note.text" size={30} color="#FFF" />
+            </View>
+            <Text style={styles.brand}>NotesNest</Text>
+            <Text style={styles.tagline}>Share and discover student notes</Text>
+          </View>
 
-          <View style={styles.tabRow}>
+          <View style={styles.card}>
+            <View style={styles.segmentRow}>
+              <Pressable
+                style={[styles.segment, mode === 'login' && styles.segmentActive]}
+                onPress={() => setMode('login')}
+              >
+                <Text style={[styles.segmentText, mode === 'login' && styles.segmentTextActive]}>
+                  Log in
+                </Text>
+              </Pressable>
+              <Pressable
+                style={[styles.segment, mode === 'signup' && styles.segmentActive]}
+                onPress={() => setMode('signup')}
+              >
+                <Text style={[styles.segmentText, mode === 'signup' && styles.segmentTextActive]}>
+                  Sign up
+                </Text>
+              </Pressable>
+            </View>
+
+            <View style={styles.inputWrap}>
+              <IconSymbol name="envelope.fill" size={18} color="#AEAEB2" />
+              <TextInput
+                style={styles.input}
+                value={email}
+                onChangeText={setEmail}
+                placeholder="Email address"
+                placeholderTextColor="#AEAEB2"
+                autoCapitalize="none"
+                keyboardType="email-address"
+                autoComplete="email"
+              />
+            </View>
+
+            <View style={styles.inputWrap}>
+              <IconSymbol name="lock.fill" size={18} color="#AEAEB2" />
+              <TextInput
+                style={styles.input}
+                value={password}
+                onChangeText={setPassword}
+                placeholder="Password"
+                placeholderTextColor="#AEAEB2"
+                secureTextEntry={!showPassword}
+                autoComplete="password"
+              />
+              <Pressable onPress={() => setShowPassword((v) => !v)} hitSlop={8}>
+                <IconSymbol
+                  name={showPassword ? 'eye.slash.fill' : 'eye.fill'}
+                  size={18}
+                  color="#AEAEB2"
+                />
+              </Pressable>
+            </View>
+
+            {mode === 'signup' && (
+              <View style={styles.inputWrap}>
+                <IconSymbol name="lock.fill" size={18} color="#AEAEB2" />
+                <TextInput
+                  style={styles.input}
+                  value={confirmPassword}
+                  onChangeText={setConfirmPassword}
+                  placeholder="Confirm password"
+                  placeholderTextColor="#AEAEB2"
+                  secureTextEntry={!showPassword}
+                />
+              </View>
+            )}
+
+            {error && (
+              <View style={styles.errorRow}>
+                <IconSymbol name="info.circle" size={14} color="#FF3B30" />
+                <Text style={styles.errorText}>{error}</Text>
+              </View>
+            )}
+
             <Pressable
-              style={[styles.tabButton, mode === 'login' && styles.tabButtonActive]}
-              onPress={() => setMode('login')}>
-              <ThemedText style={[styles.tabText, mode === 'login' && styles.tabTextActive]}>Login</ThemedText>
-            </Pressable>
-            <Pressable
-              style={[styles.tabButton, mode === 'signup' && styles.tabButtonActive]}
-              onPress={() => setMode('signup')}>
-              <ThemedText style={[styles.tabText, mode === 'signup' && styles.tabTextActive]}>
-                Sign Up
-              </ThemedText>
+              style={[styles.submitBtn, isSubmitting && { opacity: 0.7 }]}
+              onPress={onSubmit}
+              disabled={isSubmitting}
+            >
+              {isSubmitting ? (
+                <ActivityIndicator size="small" color="#FFF" />
+              ) : (
+                <View style={styles.submitInner}>
+                  <Text style={styles.submitText}>
+                    {mode === 'login' ? 'Log in' : 'Create account'}
+                  </Text>
+                  <IconSymbol name="arrow.right" size={18} color="#FFF" />
+                </View>
+              )}
             </Pressable>
           </View>
 
-          <TextInput
-            style={styles.input}
-            value={email}
-            onChangeText={setEmail}
-            placeholder="Email"
-            placeholderTextColor="#71717a"
-            autoCapitalize="none"
-            keyboardType="email-address"
-          />
-          <TextInput
-            style={styles.input}
-            value={password}
-            onChangeText={setPassword}
-            placeholder="Password"
-            placeholderTextColor="#71717a"
-            secureTextEntry
-          />
-          {mode === 'signup' ? (
-            <TextInput
-              style={styles.input}
-              value={confirmPassword}
-              onChangeText={setConfirmPassword}
-              placeholder="Confirm password"
-              placeholderTextColor="#71717a"
-              secureTextEntry
-            />
-          ) : null}
-
-          {error ? <ThemedText style={styles.error}>{error}</ThemedText> : null}
-
-          <Pressable style={styles.submitButton} onPress={onSubmit} disabled={isSubmitting}>
-            <ThemedText style={styles.submitText}>
-              {isSubmitting ? 'Please wait...' : mode === 'login' ? 'Login' : 'Create Account'}
-            </ThemedText>
-          </Pressable>
-        </View>
-        
+          <Text style={styles.footer}>
+            {mode === 'login'
+              ? "Don't have an account? Tap Sign up."
+              : 'Already have an account? Tap Log in.'}
+          </Text>
+        </ScrollView>
       </KeyboardAvoidingView>
     </SafeAreaView>
   );
@@ -144,80 +197,145 @@ async function signupWithFirebase(email: string, password: string): Promise<stri
 }
 
 const styles = StyleSheet.create({
-  safeArea: {
+  safe: {
     flex: 1,
-    backgroundColor: '#f4f4f5',
+    backgroundColor: '#F2F2F7',
   },
-  container: {
-    flex: 1,
+  kav: { flex: 1 },
+  scroll: {
+    flexGrow: 1,
     justifyContent: 'center',
-    padding: 24,
+    paddingHorizontal: 24,
+    paddingVertical: 40,
+  },
+  logoArea: {
+    alignItems: 'center',
+    gap: 10,
+    marginBottom: 32,
+  },
+  logoCircle: {
+    width: 68,
+    height: 68,
+    borderRadius: 22,
+    backgroundColor: '#007AFF',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 6,
+    shadowColor: '#007AFF',
+    shadowOpacity: 0.3,
+    shadowRadius: 12,
+    shadowOffset: { width: 0, height: 4 },
+    elevation: 6,
+  },
+  brand: {
+    fontSize: 30,
+    fontFamily: Fonts.bold,
+    color: '#1A1A2E',
+    letterSpacing: -0.5,
+  },
+  tagline: {
+    fontSize: 15,
+    fontFamily: Fonts.regular,
+    color: '#8E8E93',
   },
   card: {
-    backgroundColor: '#ffffff',
-    borderRadius: 18,
-    borderWidth: 1,
-    borderColor: '#e4e4e7',
+    backgroundColor: '#FFF',
+    borderRadius: 20,
     padding: 20,
-    gap: 12,
-  },
-  title: {
-    fontSize: 30,
-    fontFamily: Fonts.serif,
-    color: '#09090b',
-  },
-  subtitle: {
-    color: '#52525b',
-    fontSize: 14,
-  },
-  tabRow: {
-    flexDirection: 'row',
-    gap: 10,
-    marginTop: 10,
-  },
-  tabButton: {
-    flex: 1,
-    borderRadius: 12,
+    gap: 14,
     borderWidth: 1,
-    borderColor: '#d4d4d8',
+    borderColor: '#E5E5EA',
+    shadowColor: '#000',
+    shadowOpacity: 0.04,
+    shadowRadius: 10,
+    shadowOffset: { width: 0, height: 2 },
+    elevation: 2,
+  },
+  segmentRow: {
+    flexDirection: 'row',
+    backgroundColor: '#F2F2F7',
+    borderRadius: 12,
+    padding: 4,
+    marginBottom: 4,
+  },
+  segment: {
+    flex: 1,
     paddingVertical: 10,
     alignItems: 'center',
-    backgroundColor: '#fafafa',
+    borderRadius: 9,
   },
-  tabButtonActive: {
-    backgroundColor: '#18181b',
-    borderColor: '#18181b',
+  segmentActive: {
+    backgroundColor: '#FFF',
+    shadowColor: '#000',
+    shadowOpacity: 0.06,
+    shadowRadius: 4,
+    shadowOffset: { width: 0, height: 1 },
+    elevation: 2,
   },
-  tabText: {
-    fontFamily: Fonts.rounded,
-    color: '#3f3f46',
+  segmentText: {
+    fontFamily: Fonts.medium,
+    fontSize: 14,
+    color: '#8E8E93',
   },
-  tabTextActive: {
-    color: '#fafafa',
+  segmentTextActive: {
+    fontFamily: Fonts.semiBold,
+    color: '#007AFF',
+  },
+  inputWrap: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    backgroundColor: '#F8F8FA',
+    borderWidth: 1,
+    borderColor: '#E5E5EA',
+    borderRadius: 12,
+    paddingHorizontal: 16,
+    height: 52,
   },
   input: {
-    borderWidth: 1,
-    borderColor: '#d4d4d8',
-    borderRadius: 12,
-    paddingHorizontal: 14,
-    paddingVertical: 12,
+    flex: 1,
     fontSize: 15,
-    color: '#09090b',
+    fontFamily: Fonts.regular,
+    color: '#1A1A2E',
   },
-  error: {
-    color: '#b91c1c',
-    fontSize: 13,
-  },
-  submitButton: {
-    marginTop: 4,
-    borderRadius: 12,
-    backgroundColor: '#18181b',
-    paddingVertical: 12,
+  errorRow: {
+    flexDirection: 'row',
     alignItems: 'center',
+    gap: 6,
+  },
+  errorText: {
+    fontSize: 13,
+    fontFamily: Fonts.regular,
+    color: '#FF3B30',
+  },
+  submitBtn: {
+    backgroundColor: '#007AFF',
+    borderRadius: 12,
+    height: 52,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 4,
+    shadowColor: '#007AFF',
+    shadowOpacity: 0.25,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 3 },
+    elevation: 4,
+  },
+  submitInner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
   },
   submitText: {
-    color: '#fafafa',
-    fontFamily: Fonts.rounded,
-    fontSize: 14,
+    fontFamily: Fonts.semiBold,
+    fontSize: 16,
+    color: '#FFF',
+  },
+  footer: {
+    textAlign: 'center',
+    fontSize: 13,
+    fontFamily: Fonts.regular,
+    color: '#8E8E93',
+    marginTop: 20,
   },
 });
